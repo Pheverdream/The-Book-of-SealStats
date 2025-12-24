@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Storybook</title>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0b0b0f;
+      color: #ffffff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .wrap {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      gap: 14px;
+    }
+    .frame {
+      width: min(960px, 100%);
+      aspect-ratio: 16 / 9;
+      background: #111;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #111;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .controls {
+      width: min(960px, 100%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .leftControls, .rightControls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: none;
+      background: #2a2a36;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .counter {
+      font-size: 14px;
+      opacity: 0.85;
+      min-width: 120px;
+      text-align: center;
+    }
+    .hint {
+      font-size: 13px;
+      opacity: 0.7;
+      text-align: center;
+    }
+    .volWrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0.85;
+      font-size: 13px;
+      user-select: none;
+    }
+    input[type="range"] { width: 140px; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="frame">
+      <img id="pageImg" alt="Storybook page" />
+    </div>
+
+    <div class="controls">
+      <div class="leftControls">
+        <button id="prevBtn">◀ Prev</button>
+        <button id="nextBtn">Next ▶</button>
+      </div>
+
+      <div class="counter" id="pageNum"></div>
+
+      <div class="rightControls">
+        <div class="volWrap">
+          <span>Sound</span>
+          <input id="vol" type="range" min="0" max="1" step="0.01" value="0.18" />
+        </div>
+        <button id="muteBtn" title="Mute/unmute">Mute</button>
+      </div>
+    </div>
+
+    <div class="hint">
+      Click the image or use ◀ ▶ arrow keys. (Audio starts after first tap/click)
+    </div>
+
+  </div>
+
+  <script>
+    /* ==========================
+       STORYBOOK CONFIG
+       ========================== */
+
+    const TOTAL_PAGES = 41;
+    const FILE_PREFIX = "Page";
+    const FILE_EXT = "png";
+    const IMAGE_PATH = "images";
+
+    // Audio files (put them in /audio)
+    // - Page Turn plays on NEXT only
+    // - Underground Lo-Fi loops continuously while reading
+    const PAGE_SOUND_SRC = "audio/page.mp3";
+    const AMBIENT_SOUND_SRC = "audio/ambient.mp3";
+
+    // Build list of pages: images/Page1.png ... images/Page41.png
+    const pages = Array.from({ length: TOTAL_PAGES }, (_, i) => {
+      return `${IMAGE_PATH}/${FILE_PREFIX}${i + 1}.${FILE_EXT}`;
+    });
+
+    /* ==========================
+       ELEMENTS
+       ========================== */
+
+    let current = 0;
+
+    const img = document.getElementById("pageImg");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const pageNum = document.getElementById("pageNum");
+    const vol = document.getElementById("vol");
+    const muteBtn = document.getElementById("muteBtn");
+
+    /* ==========================
+       AUDIO (SUBTLE)
+       ========================== */
+
+    let audioEnabled = false;
+    let muted = false;
+
+    // Page turn sound (next page only)
+    const pageSound = new Audio(PAGE_SOUND_SRC);
+    pageSound.preload = "auto";
+
+    // Ambient lo-fi loop (plays throughout)
+    const ambientSound = new Audio(AMBIENT_SOUND_SRC);
+    ambientSound.preload = "auto";
+    ambientSound.loop = true;
+
+    // Keep ambient very soft
+    const AMBIENT_BASE_VOL = 0.06; // subtle
+    const AMBIENT_SCALE = 0.40;    // ambient = slider * 0.40 (capped)
+    const PAGE_VOL_CAP = 0.25;     // extra safety cap on page turn
+
+    function applyVolume() {
+      const slider = Number(vol.value);
+
+      if (muted || slider === 0) {
+        pageSound.volume = 0;
+        ambientSound.volume = 0;
+        return;
+      }
+
+      // Page turn uses slider but capped to stay gentle
+      pageSound.volume = Math.min(slider, PAGE_VOL_CAP);
+
+      // Ambient is quieter than page turn and capped
+      ambientSound.volume = Math.min(slider * AMBIENT_SCALE, AMBIENT_BASE_VOL);
+    }
+
+    applyVolume();
+    vol.addEventListener("input", applyVolume);
+
+    muteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      muted = !muted;
+      muteBtn.textContent = muted ? "Unmute" : "Mute";
+      applyVolume();
+    });
+
+    // Start audio after first user gesture (browser-safe)
+    function enableAudioOnce() {
+      if (audioEnabled) return;
+      audioEnabled = true;
+
+      // Prime page sound (best-effort)
+      pageSound.play().then(() => {
+        pageSound.pause();
+        pageSound.currentTime = 0;
+      }).catch(() => {});
+
+      // Start ambient loop at very low volume
+      applyVolume();
+      ambientSound.play().catch(() => {});
+    }
+
+    function playPageSound() {
+      if (!audioEnabled || muted || Number(vol.value) === 0) return;
+      pageSound.currentTime = 0;
+      pageSound.play().catch(() => {});
+    }
+
+    // Unlock audio on first interaction anywhere
+    window.addEventListener("pointerdown", enableAudioOnce, { once: true });
+
+    /* ==========================
+       RENDER + NAV
+       ========================== */
+
+    function render() {
+      img.src = pages[current];
+      pageNum.textContent = `Page ${current + 1} / ${pages.length}`;
+      prevBtn.disabled = current === 0;
+      nextBtn.disabled = current === pages.length - 1;
+    }
+
+    function goNext() {
+      if (current < pages.length - 1) {
+        current++;
+        playPageSound(); // ✅ NEXT ONLY
+        render();
+      }
+    }
+
+    function goPrev() {
+      if (current > 0) {
+        current--;
+        // no page sound on prev (as requested)
+        render();
+      }
+    }
+
+    prevBtn.addEventListener("click", (e) => { e.stopPropagation(); enableAudioOnce(); goPrev(); });
+    nextBtn.addEventListener("click", (e) => { e.stopPropagation(); enableAudioOnce(); goNext(); });
+    img.addEventListener("click", () => { enableAudioOnce(); goNext(); });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { enableAudioOnce(); goPrev(); }
+      if (e.key === "ArrowRight") { enableAudioOnce(); goNext(); }
+    });
+
+    render();
+  </script>
+</body>
+</html>
