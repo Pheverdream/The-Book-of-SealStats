@@ -232,12 +232,15 @@
        RENDER + NAV
        ========================== */
 
-    function render() {
-      img.src = pages[current];
-      pageNum.textContent = `Page ${current + 1} / ${pages.length}`;
-      prevBtn.disabled = current === 0;
-      nextBtn.disabled = current === pages.length - 1;
-    }
+    const CACHE_BUST = "v3"; // change this anytime you replace images
+
+function render() {
+  // add ?v= to force fresh fetch
+  img.src = pages[current] + `?${CACHE_BUST}`;
+  pageNum.textContent = `Page ${current + 1} / ${pages.length}`;
+  prevBtn.disabled = current === 0;
+  nextBtn.disabled = current === pages.length - 1;
+}
 
     function goNext() {
       if (current < pages.length - 1) {
@@ -268,4 +271,5 @@
   </script>
 </body>
 </html>
+
 
